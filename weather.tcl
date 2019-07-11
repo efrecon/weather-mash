@@ -5,7 +5,7 @@
 set resolvedArgv0 [file dirname [file normalize $argv0/___]];  # Trick to resolve last symlink
 set appname [file rootname [file tail $resolvedArgv0]]
 set rootdir [file normalize [file dirname $resolvedArgv0]]
-foreach module [list toclbox mqtt] {
+foreach module [list toclbox] {
     foreach search [list lib/$module ../common/$module] {
         set dir [file join $rootdir $search]
         if { [file isdirectory $dir] } {
@@ -27,15 +27,15 @@ foreach module [list til] {
         }
     }
 }
+
 package require Tcl 8.6
-package require json
 package require toclbox
-package require http
 package require minihttpd
+package require wapi::owm
 set prg_args {
     -help       ""          "Print this help and exit"
     -verbose    "* DEBUG"   "Verbosity specification for program and modules"
-    -api        ""          "API key at openweathermap"
+    -owm        ""          "API key at openweathermap"
     -lat        58.5356     "Latitude of location to serve data for"
     -lon        16.6244     "Longitude of location to serve data for"
     -period     "10M"       "Period for API requests"
@@ -166,44 +166,16 @@ proc Duration { str } {
     return $seconds
 }
 
-proc owm_store { token } {
-    global WEATHER
-    set ncode [::http::ncode $token]
-    set data [::http::data $token]
-    if { $ncode == 200 } {
-        if { $data ne "" } {
-            set json [::json::json2dict $data]
-            set mapper [list main temp temperature \
-                             main pressure pressure \
-                             main humidity humidity \
-                             wind speed wind_speed \
-                             wind deg wind_direction]
-            foreach { section subsection tgt } $mapper {
-                if { [dict exists $json $section] && [dict exists $json $section $subsection] } {
-                    dict set WEATHER(owm) $tgt [dict get $json $section $subsection]
-                    toclbox debug DEBUG "Current $tgt is [dict get $WEATHER(owm) $tgt]"
-                }
-            }
-        }
-    } else {
-        toclbox debug WARN "Could not call openweathermap! code: $ncode, data: $data"
-    }
-    ::http::cleanup $token
-}
-
-proc owm_poller {} {
-    set token [::http::geturl https://api.openweathermap.org/data/2.5/weather?APPID=$WEATHER(-api)&units=metric&lat=$WEATHER(-lat)&lon=$WEATHER(-lon) -command owm_store -timeout 30000]
-    if { $WEATHER(-period) ne "" } {
-        toclbox debug NOTICE "Next weather update in $WEATHER(-period) s."
-        set WEATHER(pulse) [after [expr {$WEATHER(-period)*1000}] owm_poller]
-    }
-}
-
 if { ! [string is integer -strict $WEATHER(-period)]} {
-    toclbox debug "Converting human-readable $WEATHER(-period)"
+    toclbox debug NOTICE "Converting human-readable $WEATHER(-period)"
     set WEATHER(-period) [Duration $WEATHER(-period)]
 }
-owm_poller
+
+toclbox https
+if { $WEATHER(-owm) ne "" } {
+    toclbox defaults ::wapi::owm -key $WEATHER(-owm)
+    set owm [::wapi::owm::new $WEATHER(-lat) $WEATHER(-lon)]
+}
 #htinit
 
 vwait forever
