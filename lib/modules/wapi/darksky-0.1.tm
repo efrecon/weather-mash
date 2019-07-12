@@ -3,20 +3,20 @@ package require json
 #package require toclbox
 package require http
 
-namespace eval ::wapi::owm {
+namespace eval ::wapi::darksky {
     namespace eval location {};  # Will host location contexts
     namespace eval gvars {
-        variable -root     https://api.openweathermap.org/data/2.5/weather
+        variable -root     https://api.darksky.net/forecast
         variable -key      "";    # API key
         variable -max      -1;    # Max number of lat/lon
         variable -period   600;   # Update period in seconds
         variable -timeout  30000; # Timeout for HTTP operations
-        variable service   "openweathermap"
+        variable service   "darksky"
     }
 }
 
 
-proc ::wapi::owm::new { lat lon } {
+proc ::wapi::darksky::new { lat lon } {
     set api [search $lat $lon]
     if { $api ne "" } {
         return $api
@@ -45,7 +45,7 @@ proc ::wapi::owm::new { lat lon } {
 }
 
 
-proc ::wapi::owm::search { lat lon } {
+proc ::wapi::darksky::search { lat lon } {
     foreach api [info vars [namespace current]::location::*] {
         upvar \#0 $api API
 
@@ -58,7 +58,7 @@ proc ::wapi::owm::search { lat lon } {
 }
 
 
-proc ::wapi::owm::Aging {} {
+proc ::wapi::darksky::Aging {} {
     if { ${gvars::-max} > 0 } {
         set live [list]
         foreach api [info vars [namespace current]::location::*] {
@@ -77,7 +77,7 @@ proc ::wapi::owm::Aging {} {
 }
 
 
-proc ::wapi::owm::Poller { api } {
+proc ::wapi::darksky::Poller { api } {
     if { ! [info exists $api] } {
         toclbox debug WARN "[dict get [info frame 0] proc]: $api does not exist"
         return
@@ -89,13 +89,13 @@ proc ::wapi::owm::Poller { api } {
         set API(__pulse) [after [expr {$API(-period)*1000}] [list [namespace current]::Poller $api]]
     }
 
-    set API(__token) [::http::geturl ${gvars::-root}?APPID=$API(-key)&units=metric&lat=$API(-latitude)&lon=$API(-longitude) \
+    set API(__token) [::http::geturl ${gvars::-root}/$API(-key)/$API(-latitude),$API(-longitude),[clock seconds]?exclude=minutely,hourly,daily&units=si \
                                      -command [list [namespace current]::Store $api] \
                                      -timeout $API(-timeout)]
 }
 
 
-proc ::wapi::owm::Store { api token } {
+proc ::wapi::darksky::Store { api token } {
     if { ! [info exists $api] } {
         toclbox debug WARN "[dict get [info frame 0] proc]: $api does not exist"
         ::http::cleanup $token
@@ -110,14 +110,15 @@ proc ::wapi::owm::Store { api token } {
     if { $ncode == 200 } {
         if { $data ne "" } {
             set json [::json::json2dict $data]
-            set mapper [list main temp temperature \
-                             main pressure pressure \
-                             main humidity humidity \
-                             wind speed wind_speed \
-                             wind deg wind_direction]
-            foreach { section subsection tgt } $mapper {
-                if { [dict exists $json $section] && [dict exists $json $section $subsection] } {
-                    set API($tgt) [dict get $json $section $subsection]
+            set result [dict get $json currently]
+            set mapper [list temperature temperature 1 \
+                             pressure pressure 1 \
+                             humidity humidity 100 \
+                             windSpeed wind_speed 1 \
+                             windBearing wind_direction 1]
+            foreach { section tgt factor} $mapper {
+                if { [dict exists $result $section] } {
+                    set API($tgt) [expr {[dict get $result $section]*$factor}]
                     toclbox debug DEBUG "Current $tgt at $gvars::service is $API($tgt)"
                 }
             }
@@ -130,7 +131,7 @@ proc ::wapi::owm::Store { api token } {
 }
 
 
-proc ::wapi::owm::get { api { tgt "" } } {
+proc ::wapi::darksky::get { api { tgt "" } } {
     if { ! [info exists $api] } {
         toclbox debug WARN "[dict get [info frame 0] proc]: $api does not exist"
         return
@@ -153,7 +154,7 @@ proc ::wapi::owm::get { api { tgt "" } } {
     return {}
 }
 
-proc ::wapi::owm::delete { api } {
+proc ::wapi::darksky::delete { api } {
     if { ! [info exists $api] } {
         toclbox debug WARN "[dict get [info frame 0] proc]: $api does not exist"
         return
@@ -176,17 +177,17 @@ if {[file normalize $::argv0] eq [file normalize [info script]]} {
 
     ::tcl::tm::path add $tocldir
     package require toclbox
-    toclbox verbosity *owm* DEBUG
+    toclbox verbosity *darksky* DEBUG
     toclbox https
-    set ::wapi::owm::gvars::-max 1
-    set ::wapi::owm::gvars::-key [lindex $::argv 0]
-    set svenstorp [::wapi::owm::new 58.5356 16.6244]
-    set second [::wapi::owm::new 58.5356 16.6244]
+    set ::wapi::darksky::gvars::-max 1
+    set ::wapi::darksky::gvars::-key [lindex $::argv 0]
+    set svenstorp [::wapi::darksky::new 58.5356 16.6244]
+    set second [::wapi::darksky::new 58.5356 16.6244]
     if { $svenstorp eq $second } {
         toclbox debug NOTICE "Getting back same object properly"
     }
-    set london [::wapi::owm::new 51.51 0.13]
-    set svenstorp [::wapi::owm::search 58.5356 16.6244]
+    set london [::wapi::darksky::new 51.51 0.13]
+    set svenstorp [::wapi::darksky::search 58.5356 16.6244]
     if { $svenstorp eq "" } {
         toclbox debug NOTICE "First created location has properly disappeared"
     }

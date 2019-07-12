@@ -32,15 +32,20 @@ package require Tcl 8.6
 package require toclbox
 package require minihttpd
 package require wapi::owm
+package require wapi::darksky
+package require wapi::weatherbit
 set prg_args {
     -help       ""          "Print this help and exit"
     -verbose    "* DEBUG"   "Verbosity specification for program and modules"
     -owm        ""          "API key at openweathermap"
+    -darksky    ""          "API key at DarkSky"
+    -weatherbit ""          "API key at weatherbit.io"
     -lat        58.5356     "Latitude of location to serve data for"
     -lon        16.6244     "Longitude of location to serve data for"
     -period     "10M"       "Period for API requests"
     -http       "http:8080" "List of protocols and ports for HTTP servicing"
     -authorization ""       "HTTPd authorizations (pattern realm authlist)"
+    -max        10          "Maximum lat,lon to cache"
 }
 
 
@@ -87,7 +92,7 @@ if { [toclbox getopt opts -help] } {
 # program state.  The description array contains help messages, we get
 # rid of them on the way into the main program's status array.
 array set WEATHER {
-    plugins {}
+    apis {}
 }
 foreach { arg val dsc } $prg_args {
     set WEATHER($arg) $val
@@ -172,9 +177,12 @@ if { ! [string is integer -strict $WEATHER(-period)]} {
 }
 
 toclbox https
-if { $WEATHER(-owm) ne "" } {
-    toclbox defaults ::wapi::owm -key $WEATHER(-owm)
-    set owm [::wapi::owm::new $WEATHER(-lat) $WEATHER(-lon)]
+foreach api [list owm darksky weatherbit] {
+    if { $WEATHER(-$api) ne "" } {
+        toclbox defaults ::wapi::$api -key $WEATHER(-$api) -max $WEATHER(-max)
+        set impl [::wapi::${api}::new $WEATHER(-lat) $WEATHER(-lon)]
+        lappend WEATHER(apis) $impl
+    }
 }
 #htinit
 
